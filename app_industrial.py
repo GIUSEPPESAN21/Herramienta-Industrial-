@@ -185,7 +185,10 @@ df_results = run_industrial_simulation(params)
 kpis = calculate_kpis(params, df_results)
 
 # --- PESTAÑAS DE NAVEGACIÓN ---
-tab1, tab2, tab3 = st.tabs(["📈 Dashboard de KPIs", " heatmap Análisis por Línea", "🔬 Análisis de Sensibilidad"])
+# ---- INICIO DE LA MODIFICACIÓN ----
+# Se añade una nueva pestaña "Acerca de"
+tab1, tab2, tab3, tab_about = st.tabs(["📈 Dashboard de KPIs", " heatmap Análisis por Línea", "🔬 Análisis de Sensibilidad", "👤 Acerca de"])
+# ---- FIN DE LA MODIFICACIÓN ----
 
 with tab1:
     st.header("Panel de Control de Rendimiento del Proceso")
@@ -220,9 +223,7 @@ with tab3:
     st.header("Análisis de Sensibilidad de Variables")
     st.markdown("Seleccione una variable para analizar su impacto en la humedad residual promedio, manteniendo los demás parámetros constantes.")
     
-    # ---- INICIO DE LA CORRECCIÓN ----
     # Se define un diccionario que contiene la clave de la variable y sus rangos (min, max)
-    # Esto elimina la necesidad de leer desde st.session_state, que causaba el error.
     variable_options = {
         'Temperatura (°C)': ('temperatura', 80, 180),
         'Velocidad del Aire (m/s)': ('velocidad_aire', 0.5, 3.0),
@@ -237,8 +238,6 @@ with tab3:
 
     # Generar datos para el gráfico de sensibilidad usando los rangos definidos
     sens_values = np.linspace(var_min, var_max, 20)
-    
-    # ---- FIN DE LA CORRECCIÓN ----
     
     sens_results = []
     for val in sens_values:
@@ -258,3 +257,14 @@ with tab3:
     fig_sens.add_vline(x=params[selected_var_key], line_dash="dash", line_color="red", annotation_text="Valor Actual")
     st.plotly_chart(fig_sens, use_container_width=True)
 
+# ---- INICIO DE LA NUEVA PESTAÑA "ACERCA DE" ----
+with tab_about:
+    st.markdown("##### Autor")
+    st.write("**Joseph Javier Sánchez Acuña**")
+    st.write("_Ingeniero Industrial, Experto en Inteligencia Artificial y Desarrollo de Software._")
+    st.markdown("---")
+    st.markdown("##### Contacto")
+    st.write("🔗 [Perfil de LinkedIn](https://www.linkedin.com/in/joseph-javier-sánchez-acuña-150410275)")
+    st.write("📂 [Repositorio en GitHub](https://github.com/GIUSEPPESAN21)")
+    st.write("📧 joseph.sanchez@uniminuto.edu.co")
+# ---- FIN DE LA NUEVA PESTAÑA "ACERCA DE" ----
