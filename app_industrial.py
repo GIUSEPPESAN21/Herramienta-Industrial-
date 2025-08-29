@@ -1,4 +1,4 @@
-# app_industrial.py
+# app.py
 # Importación de librerías
 import streamlit as st
 import pandas as pd
@@ -14,17 +14,21 @@ st.set_page_config(
 )
 
 # --- ESTILOS CSS PERSONALIZADOS ---
+# Se inyecta CSS para mejorar la apariencia de elementos clave de la UI.
 st.markdown("""
 <style>
+    /* Estilo para las métricas de KPIs */
     .stMetric {
-        border-left: 5px solid #4A90E2;
+        border-left: 5px solid #4A90E2; /* Borde azul a la izquierda */
         padding-left: 15px;
         border-radius: 5px;
-        background-color: #f0f2f6;
+        background-color: #f0f2f6; /* Fondo gris claro */
     }
+    /* Estilo para la lista de pestañas */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
+        gap: 24px; /* Espacio entre pestañas */
     }
+    /* Estilo para cada pestaña individual */
     .stTabs [data-baseweb="tab"] {
         height: 50px;
         white-space: pre-wrap;
@@ -34,8 +38,9 @@ st.markdown("""
         padding-top: 10px;
         padding-bottom: 10px;
     }
+    /* Estilo para la pestaña seleccionada */
     .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF;
+        background-color: #FFFFFF; /* Fondo blanco para la activa */
     }
 </style>
 """, unsafe_allow_html=True)
@@ -45,54 +50,57 @@ st.markdown("""
 def run_industrial_simulation(params):
     """
     Ejecuta una simulación de secado industrial con un modelo multifactorial.
+    Este modelo considera principios de transferencia de masa y calor.
     
     Args:
-        params (dict): Diccionario con todos los parámetros de entrada.
+        params (dict): Diccionario con todos los parámetros de entrada del sidebar.
 
     Returns:
-        pd.DataFrame: DataFrame con resultados detallados por línea.
+        pd.DataFrame: DataFrame con resultados detallados por línea de producción.
     """
-    # Constantes del modelo (ajustables para calibración)
+    # Constantes del modelo (pueden ser calibradas con datos reales)
     DRY_WEIGHT_G = 50.0  # Peso seco constante del producto en gramos
-    BASE_TEMP_C = 90.0
-    BASE_AIR_SPEED_MS = 1.5
+    BASE_TEMP_C = 90.0   # Temperatura de referencia
+    BASE_AIR_SPEED_MS = 1.5 # Velocidad de aire de referencia
     
-    # Calcular masa de agua inicial
+    # 1. Calcular masa de agua inicial a evaporar
     initial_water_mass = params['peso_humedo'] - DRY_WEIGHT_G
     
-    # Calcular factor de tasa de secado base (influencia de T y V)
+    # 2. Calcular factor de tasa de secado base (influencia de Temperatura y Velocidad del aire)
+    # Se usan exponentes para modelar relaciones no lineales
     temp_factor = (params['temperatura'] / BASE_TEMP_C)**1.5
     airspeed_factor = (params['velocidad_aire'] / BASE_AIR_SPEED_MS)**0.8
     drying_rate_base = temp_factor * airspeed_factor
     
-    # Ajustar por humedad relativa del aire de entrada
+    # 3. Ajustar por humedad relativa del aire de entrada (aire más húmedo seca menos)
     rh_factor = 1 - (params['humedad_aire'] / 100)
     
-    # Calcular la masa de agua evaporada base
+    # 4. Calcular la masa de agua evaporada base usando una curva de decaimiento exponencial
+    # Esto simula que el secado es más rápido al principio y más lento al final
     water_evaporated_base = initial_water_mass * (1 - np.exp(-0.05 * params['tiempo_residencia'] * drying_rate_base * rh_factor))
     
-    # Simulación por línea
+    # 5. Simulación por línea, aplicando factores de no uniformidad
     nombres_lineas = [f'Línea {i+1}' for i in range(params['num_lineas'])]
     humedad_final_list = []
     
     for i in range(params['num_lineas']):
-        # Factor de no uniformidad (líneas externas secan menos)
+        # Se penaliza el secado en las líneas externas, simulando menor flujo de aire/calor
         if i == 0 or i == params['num_lineas'] - 1:
-            uniformity_factor = 0.85
+            uniformity_factor = 0.85 # 15% menos eficiente
         elif i == 1 or i == params['num_lineas'] - 2:
-            uniformity_factor = 0.95
+            uniformity_factor = 0.95 # 5% menos eficiente
         else:
-            uniformity_factor = 1.0
+            uniformity_factor = 1.0 # Eficiencia nominal
         
         # Agua evaporada en la línea específica
         water_evaporated_line = water_evaporated_base * uniformity_factor
         final_water_mass = initial_water_mass - water_evaporated_line
         
-        # Calcular humedad residual en base húmeda
+        # Calcular humedad residual en base húmeda: (masa_agua / masa_total) * 100
         final_total_mass = final_water_mass + DRY_WEIGHT_G
         final_humidity = (final_water_mass / final_total_mass) * 100
         
-        humedad_final_list.append(max(0, final_humidity))
+        humedad_final_list.append(max(0, final_humidity)) # Evitar valores negativos
 
     df = pd.DataFrame({
         'Línea': nombres_lineas,
@@ -104,7 +112,7 @@ def calculate_kpis(params, df_results):
     """Calcula los KPIs (Key Performance Indicators) del proceso."""
     # CONSTANTES FÍSICAS Y DE COSTO
     AIR_DENSITY_KGM3 = 1.0  # Densidad del aire a T de operación
-    AIR_SPECIFIC_HEAT_J_KGK = 1005
+    AIR_SPECIFIC_HEAT_J_KGK = 1005 # Calor específico del aire
     PRICE_KWH = 0.15  # Precio de la energía en $/kWh
     
     # Tasa de Evaporación
@@ -119,9 +127,9 @@ def calculate_kpis(params, df_results):
     air_flow_m3s = params['velocidad_aire'] * dryer_cross_section_m2
     air_mass_kgs = air_flow_m3s * AIR_DENSITY_KGM3
     
-    # Energía para calentar aire (asumiendo T_ambiente = 25°C)
-    power_heating_kw = (air_mass_kgs * AIR_SPECIFIC_HEAT_J_KGK * (params['temperatura'] - 25)) / 1000
-    # Energía para ventiladores (modelo cúbico simple)
+    # Energía para calentar aire (Q = m*cp*dT)
+    power_heating_kw = (air_mass_kgs * AIR_SPECIFIC_HEAT_J_KGK * (params['temperatura'] - 25)) / 1000 # Asumiendo T_ambiente = 25°C
+    # Energía para ventiladores (la potencia aumenta cúbicamente con la velocidad)
     power_fan_kw = 2.5 * (params['velocidad_aire']**3) * params['num_lineas']
     
     total_power_kw = power_heating_kw + power_fan_kw
@@ -182,14 +190,10 @@ tab1, tab2, tab3 = st.tabs(["📈 Dashboard de KPIs", " heatmap Análisis por L�
 with tab1:
     st.header("Panel de Control de Rendimiento del Proceso")
     cols = st.columns(4)
-    with cols[0]:
-        st.metric(label="Humedad Residual Promedio", value=f"{kpis['humedad_promedio']:.2f} %")
-    with cols[1]:
-        st.metric(label="Costo Energético Estimado", value=f"$ {kpis['costo_energetico']:.2f} / hora")
-    with cols[2]:
-        st.metric(label="Tasa de Evaporación", value=f"{kpis['tasa_evaporacion']:.2f} kg/h")
-    with cols[3]:
-        st.metric(label="Índice de Riesgo de Calidad", value=kpis['riesgo_calidad'])
+    cols[0].metric(label="Humedad Residual Promedio", value=f"{kpis['humedad_promedio']:.2f} %")
+    cols[1].metric(label="Costo Energético Estimado", value=f"$ {kpis['costo_energetico']:.2f} / hora")
+    cols[2].metric(label="Tasa de Evaporación", value=f"{kpis['tasa_evaporacion']:.2f} kg/h")
+    cols[3].metric(label="Índice de Riesgo de Calidad", value=kpis['riesgo_calidad'])
     
     st.info("Este dashboard resume los indicadores clave de rendimiento (KPIs) para la configuración de parámetros actual. Utilícelo para una evaluación rápida de la eficiencia y la calidad.", icon="ℹ️")
 
@@ -198,12 +202,12 @@ with tab2:
     col1, col2 = st.columns([3, 2])
     with col1:
         st.subheader("Perfil de Humedad a lo Ancho del Secador")
-        # Heatmap
+        # Heatmap para visualizar la distribución de humedad
         fig_heatmap = go.Figure(data=go.Heatmap(
                    z=[df_results['Humedad Residual (%)'].values],
                    x=df_results['Línea'],
                    y=['Humedad (%)'],
-                   colorscale='Viridis_r',
+                   colorscale='Viridis_r', # Escala de color invertida (mejor para humedad)
                    zmin=0, zmax=15))
         fig_heatmap.update_layout(title='Mapa de Calor de Humedad Residual', autosize=True)
         st.plotly_chart(fig_heatmap, use_container_width=True)
@@ -216,21 +220,25 @@ with tab3:
     st.header("Análisis de Sensibilidad de Variables")
     st.markdown("Seleccione una variable para analizar su impacto en la humedad residual promedio, manteniendo los demás parámetros constantes.")
     
+    # ---- INICIO DE LA CORRECCIÓN ----
+    # Se define un diccionario que contiene la clave de la variable y sus rangos (min, max)
+    # Esto elimina la necesidad de leer desde st.session_state, que causaba el error.
     variable_options = {
-        'Temperatura (°C)': 'temperatura',
-        'Velocidad del Aire (m/s)': 'velocidad_aire',
-        'Tiempo de Residencia (min)': 'tiempo_residencia',
-        'Peso Húmedo (g)': 'peso_humedo'
+        'Temperatura (°C)': ('temperatura', 80, 180),
+        'Velocidad del Aire (m/s)': ('velocidad_aire', 0.5, 3.0),
+        'Tiempo de Residencia (min)': ('tiempo_residencia', 5, 20),
+        'Peso Húmedo (g)': ('peso_humedo', 200, 300)
     }
+    
     selected_var_label = st.selectbox("Seleccione la variable a analizar:", options=list(variable_options.keys()))
-    selected_var_key = variable_options[selected_var_label]
+    
+    # Se obtienen la clave y los rangos directamente del diccionario
+    selected_var_key, var_min, var_max = variable_options[selected_var_label]
 
-    # Generar datos para el gráfico de sensibilidad
-    sens_values = np.linspace(
-        st.session_state[f'sidebar_{selected_var_key}_min'], 
-        st.session_state[f'sidebar_{selected_var_key}_max'], 
-        20
-    )
+    # Generar datos para el gráfico de sensibilidad usando los rangos definidos
+    sens_values = np.linspace(var_min, var_max, 20)
+    
+    # ---- FIN DE LA CORRECCIÓN ----
     
     sens_results = []
     for val in sens_values:
@@ -239,29 +247,14 @@ with tab3:
         df_sens = run_industrial_simulation(temp_params)
         sens_results.append(df_sens['Humedad Residual (%)'].mean())
 
-    # Crear el gráfico
+    # Crear el gráfico de líneas
     fig_sens = px.line(
         x=sens_values, 
         y=sens_results, 
         title=f'Impacto de {selected_var_label} en la Humedad Promedio',
         labels={'x': selected_var_label, 'y': 'Humedad Residual Promedio (%)'}
     )
+    # Línea vertical para indicar el valor actual seleccionado en el sidebar
     fig_sens.add_vline(x=params[selected_var_key], line_dash="dash", line_color="red", annotation_text="Valor Actual")
     st.plotly_chart(fig_sens, use_container_width=True)
 
-# Hack para que el análisis de sensibilidad funcione con los rangos del slider
-# Se necesita almacenar los min/max de los sliders en el estado de la sesión
-for key, component in st.sidebar._components.items():
-    if isinstance(component, st.delta_generator.DeltaGenerator) and hasattr(component, 'label'):
-        if 'Peso Húmedo' in component.label:
-            st.session_state['sidebar_peso_humedo_min'] = 200
-            st.session_state['sidebar_peso_humedo_max'] = 300
-        if 'Temperatura' in component.label:
-            st.session_state['sidebar_temperatura_min'] = 80
-            st.session_state['sidebar_temperatura_max'] = 180
-        if 'Velocidad del Aire' in component.label:
-            st.session_state['sidebar_velocidad_aire_min'] = 0.5
-            st.session_state['sidebar_velocidad_aire_max'] = 3.0
-        if 'Tiempo de Residencia' in component.label:
-            st.session_state['sidebar_tiempo_residencia_min'] = 5
-            st.session_state['sidebar_tiempo_residencia_max'] = 20
